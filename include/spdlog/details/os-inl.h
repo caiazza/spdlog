@@ -230,7 +230,12 @@ SPDLOG_INLINE size_t filesize(FILE *f)
 #endif
 
 #else // unix
+// OpenBSD doesn't compile with :: before the fileno(..)
+#if defined(__OpenBSD__)
+    int fd = fileno(f);
+#else
     int fd = ::fileno(f);
+#endif
 // 64 bits(but not in osx or cygwin, where fstat64 is deprecated)
 #if (defined(__linux__) || defined(__sun) || defined(_AIX)) && (defined(__LP64__) || defined(_LP64))
     struct stat64 st;
@@ -462,7 +467,7 @@ SPDLOG_INLINE void wstr_to_utf8buf(wstring_view_t wstr, memory_buf_t &target)
 #endif // (defined(SPDLOG_WCHAR_TO_UTF8_SUPPORT) || defined(SPDLOG_WCHAR_FILENAMES)) && defined(_WIN32)
 
 // return true on success
-SPDLOG_INLINE bool mkdir_(const filename_t &path)
+static SPDLOG_INLINE bool mkdir_(const filename_t &path)
 {
 #ifdef _WIN32
 #ifdef SPDLOG_WCHAR_FILENAMES
