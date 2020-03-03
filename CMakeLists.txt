@@ -3,14 +3,20 @@
 
 cmake_minimum_required(VERSION 3.2)
 
+ENABLE_LANGUAGE(C)
+
 #---------------------------------------------------------------------------------------
 # Start spdlog project
 #---------------------------------------------------------------------------------------
-include(GNUInstallDirs)
 include(cmake/utils.cmake)
 include(cmake/ide.cmake)
 
 spdlog_extract_version()
+
+project(spdlog VERSION ${SPDLOG_VERSION} LANGUAGES CXX)
+message(STATUS "Build spdlog: ${SPDLOG_VERSION}")
+
+include(GNUInstallDirs)
 
 #---------------------------------------------------------------------------------------
 # Set default build to release
@@ -19,15 +25,21 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose Release or Debug" FORCE)
 endif()
 
-project(spdlog VERSION ${SPDLOG_VERSION} LANGUAGES CXX)
-message(STATUS "Build spdlog: ${SPDLOG_VERSION}")
 
 #---------------------------------------------------------------------------------------
 # Compiler config
 #---------------------------------------------------------------------------------------
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+if (NOT CMAKE_CXX_STANDARD)
+    set(CMAKE_CXX_STANDARD 11)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+endif()
+
+set(CMAKE_CXX_EXTENSIONS  OFF)
+
+if(CMAKE_SYSTEM_NAME MATCHES "CYGWIN")
+	set(CMAKE_CXX_EXTENSIONS ON)
+endif()
+
 
 #---------------------------------------------------------------------------------------
 # Set SPDLOG_MASTER_PROJECT to ON if we are building spdlog
@@ -63,8 +75,12 @@ option(SPDLOG_SANITIZE_ADDRESS "Enable address sanitizer in tests" OFF)
 # install options
 option(SPDLOG_INSTALL "Generate the install target" ${SPDLOG_MASTER_PROJECT})
 option(SPDLOG_FMT_EXTERNAL "Use external fmt library instead of bundled" OFF)
+option(SPDLOG_FMT_EXTERNAL_HO "Use external fmt header-only library instead of bundled" OFF)
 option(SPDLOG_NO_EXCEPTIONS "Compile with -fno-exceptions. Call abort() on any spdlog exceptions" OFF)
 
+if (SPDLOG_FMT_EXTERNAL AND SPDLOG_FMT_EXTERNAL_HO)
+    message(FATAL_ERROR "SPDLOG_FMT_EXTERNAL and SPDLOG_FMT_EXTERNAL_HO are mutually exclusive")
+endif()
 
 # misc tweakme options
 if(WIN32)
@@ -80,6 +96,17 @@ option(SPDLOG_NO_THREAD_ID "prevent spdlog from querying the thread id on each l
 option(SPDLOG_NO_TLS "prevent spdlog from using thread local storage" OFF)
 option(SPDLOG_NO_ATOMIC_LEVELS "prevent spdlog from using of std::atomic log levels (use only if your code never modifies log levels concurrently" OFF)
 
+# clang-tidy
+if(${CMAKE_VERSION} VERSION_GREATER "3.5") 
+    option(SPDLOG_TIDY "run clang-tidy" OFF)
+endif()
+
+if(SPDLOG_TIDY)
+    set(CMAKE_CXX_CLANG_TIDY "clang-tidy")
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+    message(STATUS "Enabled clang-tidy")
+endif()
+
 find_package(Threads REQUIRED)
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 #---------------------------------------------------------------------------------------
@@ -93,7 +120,7 @@ set(SPDLOG_SRCS
         src/async.cpp)
 
 
-if(NOT SPDLOG_FMT_EXTERNAL)
+if(NOT SPDLOG_FMT_EXTERNAL AND NOT SPDLOG_FMT_EXTERNAL_HO)
     list(APPEND SPDLOG_SRCS src/fmt.cpp)
 endif()
 
@@ -133,15 +160,21 @@ target_link_libraries(spdlog_header_only INTERFACE Threads::Threads)
 #---------------------------------------------------------------------------------------
 # Use fmt package if using external fmt
 #---------------------------------------------------------------------------------------
-if(SPDLOG_FMT_EXTERNAL)
+if(SPDLOG_FMT_EXTERNAL OR SPDLOG_FMT_EXTERNAL_HO)
     if (NOT TARGET fmt::fmt)
         find_package(fmt REQUIRED)
     endif ()
     target_compile_definitions(spdlog PUBLIC SPDLOG_FMT_EXTERNAL)
-    target_link_libraries(spdlog PUBLIC fmt::fmt)
-
     target_compile_definitions(spdlog_header_only INTERFACE SPDLOG_FMT_EXTERNAL)
-    target_link_libraries(spdlog_header_only INTERFACE fmt::fmt)
+
+    # use external fmt-header-nly
+    if(SPDLOG_FMT_EXTERNAL_HO)
+        target_link_libraries(spdlog PUBLIC fmt::fmt-header-only)
+        target_link_libraries(spdlog_header_only INTERFACE fmt::fmt-header-only)
+    else() # use external compile fmt
+        target_link_libraries(spdlog PUBLIC fmt::fmt)
+        target_link_libraries(spdlog_header_only INTERFACE fmt::fmt)
+    endif()
 
     set(PKG_CONFIG_REQUIRES fmt) # add dependency to pkg-config
 endif()
@@ -233,7 +266,7 @@ if (SPDLOG_INSTALL)
     install(DIRECTORY include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" PATTERN "fmt/bundled" EXCLUDE)
     install(TARGETS spdlog spdlog_header_only EXPORT spdlog DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 
-    if(NOT SPDLOG_FMT_EXTERNAL)
+    if(NOT SPDLOG_FMT_EXTERNAL AND NOT SPDLOG_FMT_EXTERNAL_HO)
         install(DIRECTORY include/${PROJECT_NAME}/fmt/bundled/
                 DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/fmt/bundled/")
     endif()
@@ -267,6 +300,5 @@ if (SPDLOG_INSTALL)
     # Support creation of installable packages
     #---------------------------------------------------------------------------------------
     include(cmake/spdlogCPack.cmake)
-
 endif ()
 
